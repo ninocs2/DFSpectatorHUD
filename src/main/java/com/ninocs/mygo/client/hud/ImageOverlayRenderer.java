@@ -117,23 +117,40 @@ public class ImageOverlayRenderer {
         int screenHeight = event.getWindow().getGuiScaledHeight();
 
         // 容器居中计算
-        int frameX = screenWidth - FRAME_WIDTH - 1; // 右边距离1px
+        int frameX = screenWidth - FRAME_WIDTH - 2; // 右边距离2px
         int frameY = (screenHeight / 2) - (FRAME_HEIGHT / 2); // 垂直居中
 
         // 容器（半透明黑色背景，无边框）
         int bgColor = 0x80000000; // 半透明黑色背景
         gui.fill(frameX, frameY, frameX + FRAME_WIDTH, frameY + FRAME_HEIGHT, bgColor);
 
-        // 图片缩放比例（自适应容器最大宽度高度，保持宽高比，无内边距）
+        // 图片缩放比例（填充整个容器，保持宽高比）
         float scaleX = (float) FRAME_WIDTH / imageWidth;
         float scaleY = (float) FRAME_HEIGHT / imageHeight;
-        float scale = Math.min(scaleX, scaleY); // 选择较小的缩放比例以保持宽高比
+        float scale = Math.max(scaleX, scaleY); // 选择较大的缩放比例以填充整个容器
         
         int drawWidth = (int) (imageWidth * scale);
         int drawHeight = (int) (imageHeight * scale);
 
-        int imgX = frameX + (FRAME_WIDTH - drawWidth) / 2;
-        int imgY = frameY + (FRAME_HEIGHT - drawHeight) / 2;
+        // 计算裁剪区域（平均裁剪两侧和上下）
+        float uMin = 0.0f;
+        float vMin = 0.0f;
+        float uMax = 1.0f;
+        float vMax = 1.0f;
+        
+        // 如果宽度超出，平均裁剪左右两侧
+        if (drawWidth > FRAME_WIDTH) {
+            float excess = (drawWidth - FRAME_WIDTH) / (float) drawWidth;
+            uMin = excess / 2;
+            uMax = 1.0f - excess / 2;
+        }
+        
+        // 如果高度超出，平均裁剪上下两侧
+        if (drawHeight > FRAME_HEIGHT) {
+            float excess = (drawHeight - FRAME_HEIGHT) / (float) drawHeight;
+            vMin = excess / 2;
+            vMax = 1.0f - excess / 2;
+        }
         
         // 调试信息
         LOGGER.debug("[DFSpectatorUi] 图片尺寸: {}x{}, 缩放比例: {}, 绘制尺寸: {}x{}", 
@@ -146,13 +163,14 @@ public class ImageOverlayRenderer {
         RenderSystem.enableBlend();
         RenderSystem.defaultBlendFunc();
 
-        // 绘制图片 - 修复纹理坐标映射
+        // 绘制图片 - 使用UV坐标实现平均裁剪
         gui.blit(
                 dynamicTexture,
-                imgX, imgY,
-                0, 0,
-                drawWidth, drawHeight,
-                drawWidth, drawHeight
+                frameX, frameY,
+                FRAME_WIDTH, FRAME_HEIGHT,
+                (int)(uMin * imageWidth), (int)(vMin * imageHeight),
+                (int)(uMax * imageWidth - uMin * imageWidth), (int)(vMax * imageHeight - vMin * imageHeight),
+                imageWidth, imageHeight
         );
 
         RenderSystem.disableBlend();
