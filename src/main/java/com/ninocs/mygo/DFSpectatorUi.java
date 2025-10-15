@@ -1,15 +1,12 @@
 package com.ninocs.mygo;
 
-import com.mojang.logging.LogUtils;
 import net.minecraftforge.api.distmarker.Dist;
-import net.minecraftforge.common.MinecraftForge;
 import net.minecraftforge.event.server.ServerStartingEvent;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
 import net.minecraftforge.fml.ModLoadingContext;
 import net.minecraftforge.fml.common.Mod;
 import net.minecraftforge.fml.config.ModConfig;
 import net.minecraftforge.fml.event.lifecycle.FMLClientSetupEvent;
-import org.slf4j.Logger;
 
 // 这个值应该与META-INF/mods.toml文件中的条目匹配
 @Mod(DFSpectatorUi.MODID)
@@ -17,12 +14,10 @@ public class DFSpectatorUi {
 
     // 在一个通用位置定义mod id，供所有内容引用
     public static final String MODID = "dfspectatorui";
-    // 直接引用slf4j日志记录器
-    private static final Logger LOGGER = LogUtils.getLogger();
 
     public DFSpectatorUi() {
 
-        // 注册我们mod的ForgeConfigSpec，以便Forge可以为我们创建和加载配置文件
+        // 注册mod的ForgeConfigSpec，以便Forge可以为我们创建和加载配置文件
         ModLoadingContext.get().registerConfig(ModConfig.Type.COMMON, Config.SPEC);
 
     }

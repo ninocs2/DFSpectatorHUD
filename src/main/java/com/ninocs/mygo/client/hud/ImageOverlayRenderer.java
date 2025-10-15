@@ -31,11 +31,25 @@ public class ImageOverlayRenderer {
     private static int imageWidth = 256;
     private static int imageHeight = 128;
     
+    // 头像纹理
+    private static ResourceLocation avatarTexture = null;
+    
+    // 玩家名称
+    private static String playerName = "PlayerId"; // 默认显示
+    
     // 容器尺寸 (9:16比例)
     private static final int FRAME_WIDTH = 108;
     private static final int FRAME_HEIGHT = 192;
     
-    // 默认图片路径（相对于游戏运行目录）
+    // 底部容器高度
+    private static final int BOTTOM_CONTAINER_HEIGHT = 30;
+    
+    // 头像相关常量
+    private static final int AVATAR_SIZE = 24; // 头像尺寸 (24x24像素)
+    private static final int AVATAR_MARGIN = 3; // 头像边距
+    private static final String DEFAULT_AVATAR_PATH = "MCGO/cache/avatar/29e8f55c93fde9711c77c4796331fec536973d8d73f35c1bacc6b71dad1d5efd.png";
+    
+    // 默认背景图片路径（相对于游戏运行目录）
     private static final String DEFAULT_IMAGE_PATH = "MCGO/cache/card/523f8e5883a34cee54304e35ba7208cbf3c610de891f7646f4eb516ca40141af.jpg";
 
     /**
@@ -44,7 +58,44 @@ public class ImageOverlayRenderer {
     public static void enableHud() {
         hudEnabled = true;
         loadExternalImage(DEFAULT_IMAGE_PATH);
+        loadAvatarImage(); // 加载默认头像
+        
+        // 获取当前玩家名称
+        Minecraft mc = Minecraft.getInstance();
+        if (mc.player != null) {
+            playerName = mc.player.getName().getString();
+        }
+        
         LOGGER.info("[DFSpectatorUi] HUD显示已启用");
+    }
+
+    /**
+     * 从外部路径加载头像
+     */
+    private static void loadAvatarImage() {
+        try {
+            Path fullPath = Paths.get(DEFAULT_AVATAR_PATH);
+            if (!Files.exists(fullPath)) {
+                LOGGER.warn("[DFSpectatorUi] 头像文件不存在: {}", fullPath.toAbsolutePath());
+                return;
+            }
+
+            // 读取头像文件
+            try (FileInputStream fis = new FileInputStream(fullPath.toFile())) {
+                NativeImage nativeImage = NativeImage.read(fis);
+                
+                // 创建动态纹理
+                DynamicTexture texture = new DynamicTexture(nativeImage);
+                avatarTexture = ResourceLocation.fromNamespaceAndPath("dfspectatorui", "dynamic_avatar");
+                
+                // 注册纹理到纹理管理器
+                Minecraft.getInstance().getTextureManager().register(avatarTexture, texture);
+                
+                LOGGER.info("[DFSpectatorUi] 成功加载头像: {}", fullPath.toAbsolutePath());
+            }
+        } catch (IOException e) {
+            LOGGER.error("[DFSpectatorUi] 加载头像失败: {}", DEFAULT_AVATAR_PATH, e);
+        }
     }
 
     /**
@@ -81,7 +132,7 @@ public class ImageOverlayRenderer {
                 
                 // 创建动态纹理
                 DynamicTexture texture = new DynamicTexture(nativeImage);
-                dynamicTexture = new ResourceLocation("dfspectatorui", "dynamic_overlay");
+                dynamicTexture = ResourceLocation.fromNamespaceAndPath("dfspectatorui", "dynamic_overlay");
                 
                 // 注册纹理到纹理管理器
                 Minecraft.getInstance().getTextureManager().register(dynamicTexture, texture);
@@ -116,11 +167,14 @@ public class ImageOverlayRenderer {
         int screenWidth = event.getWindow().getGuiScaledWidth();
         int screenHeight = event.getWindow().getGuiScaledHeight();
 
-        // 容器居中计算
+        // 容器居中计算（只基于图片容器高度）
         int frameX = screenWidth - FRAME_WIDTH - 2; // 右边距离2px
         int frameY = (screenHeight / 2) - (FRAME_HEIGHT / 2); // 垂直居中
+        
+        // 底部容器位置（位于图片容器内部的底部）
+        int bottomContainerY = frameY + FRAME_HEIGHT - BOTTOM_CONTAINER_HEIGHT; // 在图片容器底部
 
-        // 容器（半透明黑色背景，无边框）
+        // 绘制图片容器（半透明黑色背景，无边框）
         int bgColor = 0x80000000; // 半透明黑色背景
         gui.fill(frameX, frameY, frameX + FRAME_WIDTH, frameY + FRAME_HEIGHT, bgColor);
 
@@ -172,6 +226,34 @@ public class ImageOverlayRenderer {
                 (int)(uMax * imageWidth - uMin * imageWidth), (int)(vMax * imageHeight - vMin * imageHeight),
                 imageWidth, imageHeight
         );
+
+        // 绘制底部容器（覆盖在图片上方，半透明黑色背景）
+        int bottomBgColor = 0x50000000; // 半透明黑色背景
+        gui.fill(frameX, bottomContainerY, frameX + FRAME_WIDTH, bottomContainerY + BOTTOM_CONTAINER_HEIGHT, bottomBgColor);
+
+        // 绘制头像（在底部容器中靠左居中）
+        if (avatarTexture != null) {
+            int avatarX = frameX + AVATAR_MARGIN;
+            int avatarY = bottomContainerY + (BOTTOM_CONTAINER_HEIGHT - AVATAR_SIZE) / 2; // 垂直居中
+            
+            gui.blit(
+                    avatarTexture,
+                    avatarX, avatarY,
+                    AVATAR_SIZE, AVATAR_SIZE,
+                    0, 0,
+                    AVATAR_SIZE, AVATAR_SIZE,
+                    AVATAR_SIZE, AVATAR_SIZE
+            );
+        }
+
+        // 绘制玩家名称（在底部容器中右侧显示）
+        if (playerName != null && !playerName.isEmpty()) {
+            int textX = frameX + AVATAR_MARGIN + AVATAR_SIZE + 4; // 头像右侧4像素间距
+            int textY = bottomContainerY + (BOTTOM_CONTAINER_HEIGHT - 8) / 2; // 垂直居中（字体高度约8像素）
+            int textColor = 0xFFFFFFFF; // 白色文字
+            
+            gui.drawString(Minecraft.getInstance().font, playerName, textX, textY, textColor);
+        }
 
         RenderSystem.disableBlend();
     }
