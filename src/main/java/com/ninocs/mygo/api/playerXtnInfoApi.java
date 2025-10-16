@@ -14,7 +14,7 @@ import java.util.logging.Level;
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 import com.google.gson.JsonSyntaxException;
-import com.ninocs.mygo.util.PlayerDataStorage;
+import com.ninocs.mygo.client.data.PlayerDataStorage;
 import com.ninocs.mygo.downloads.ImageDownloader;
 
 public class playerXtnInfoApi {

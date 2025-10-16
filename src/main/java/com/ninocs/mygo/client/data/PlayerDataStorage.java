@@ -1,4 +1,4 @@
-package com.ninocs.mygo.util;
+package com.ninocs.mygo.client.data;
 
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;

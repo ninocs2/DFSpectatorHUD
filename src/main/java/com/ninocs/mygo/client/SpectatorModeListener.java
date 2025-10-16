@@ -1,21 +1,23 @@
 package com.ninocs.mygo.client;
 
-import com.mojang.logging.LogUtils;
 import com.ninocs.mygo.DFSpectatorUi;
+import com.ninocs.mygo.client.hud.ImageOverlayRenderer;
 import net.minecraft.client.Minecraft;
+import net.minecraft.client.player.LocalPlayer;
+import net.minecraft.world.entity.Entity;
+import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.level.GameType;
 import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.event.TickEvent;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
 import net.minecraftforge.fml.common.Mod;
-import org.slf4j.Logger;
 /**
  * 客户端 Tick 监听器：比较上一次与当前的玩家模式，实现"无事件"检测。
  */
 @Mod.EventBusSubscriber(modid = DFSpectatorUi.MODID, value = Dist.CLIENT, bus = Mod.EventBusSubscriber.Bus.FORGE)
 public final class SpectatorModeListener {
-    private static final Logger LOGGER = LogUtils.getLogger();
     private static GameType lastMode = null;
+    private static Entity lastCamera = null;
     private static final SpectatorModeObserver observer = new SpectatorModeObserver();
 
     private SpectatorModeListener() {}
@@ -27,43 +29,43 @@ public final class SpectatorModeListener {
         }
 
         Minecraft mc = Minecraft.getInstance();
-        if (mc.player == null || mc.level == null) {
+        LocalPlayer player = mc.player;
+        if (player == null || mc.gameMode == null) {
             // 世界未就绪/未进入游戏
             lastMode = null;
+            lastCamera = null;
             return;
         }
 
-        GameType current = getCurrentGameType(mc);
-        if (current == null) {
-            return;
-        }
+        // 当前游戏模式
+        GameType current = mc.gameMode.getPlayerMode();
 
+        // 检查游戏模式变化
         if (lastMode == null || current != lastMode) {
             // 直接调用观察者
             observer.onGameModeChange(lastMode, current);
             lastMode = current;
         }
-    }
 
-    private static GameType getCurrentGameType(Minecraft mc) {
-        try {
-            // 优先使用客户端的 MultiPlayerGameMode 信息
-            if (mc.gameMode != null) {
-                return mc.gameMode.getPlayerMode();
+        // 只在观察者模式下监听摄像头变化
+        if (current == GameType.SPECTATOR) {
+            Entity camera = mc.getCameraEntity();
+
+            // 如果附身目标变化
+            if (camera != lastCamera) {
+                lastCamera = camera;
+
+                if (camera instanceof Player targetPlayer) {
+                    String targetName = targetPlayer.getName().getString();
+                    // 通知ImageOverlayRenderer更新显示
+                    ImageOverlayRenderer.notifyObservedPlayerChange(targetName);
+                } else {
+                    // 通知ImageOverlayRenderer切换到自由观察状态
+                    ImageOverlayRenderer.notifyObservedPlayerChange(null);
+                }
             }
-        } catch (Throwable t) {
-            // 兼容不同映射的潜在差异
-            LOGGER.debug("获取客户端 gameMode.getPlayerMode() 失败，尝试后备方案", t);
+        } else {
+            lastCamera = null; // 离开观察者模式就清空状态
         }
-
-        // 后备：仅能检测是否观察者，其余模式不可区分
-        // 仍返回对应 GameType（若为观察者），否则返回 null 表示未知
-        try {
-            if (mc.player != null && mc.player.isSpectator()) {
-                return GameType.SPECTATOR;
-            }
-        } catch (Throwable ignored) {}
-
-        return null;
     }
 }
