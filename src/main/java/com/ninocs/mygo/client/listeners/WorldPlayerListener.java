@@ -158,12 +158,7 @@ public class WorldPlayerListener {
 
         String playerName = player.getName().getString();
         
-        // 排除本地玩家
-        if (isLocalPlayer(playerName)) {
-            return;
-        }
-        
-        // 只在活跃监听状态下处理新玩家
+        // 只在活跃监听状态下处理新玩家（包括本地玩家）
         if (worldState == WorldState.ACTIVE_MONITORING) {
             handleNewPlayer(playerName);
         }
@@ -279,18 +274,16 @@ public class WorldPlayerListener {
         }
 
         try {
-            // 从连接获取在线玩家信息 - 使用流式API优化
+            // 从连接获取在线玩家信息 - 使用流式API优化（包括本地玩家）
             Set<String> playerNames = mc.getConnection().getOnlinePlayers().stream()
                 .map(playerInfo -> playerInfo.getProfile().getName())
-                .filter(name -> !isLocalPlayer(name))
                 .collect(Collectors.toSet());
             
-            // 从世界实体获取玩家（补充检查）
+            // 从世界实体获取玩家（补充检查，包括本地玩家）
             if (mc.level instanceof ClientLevel) {
                 ClientLevel clientLevel = (ClientLevel) mc.level;
                 clientLevel.players().stream()
                     .map(player -> player.getName().getString())
-                    .filter(name -> !isLocalPlayer(name))
                     .forEach(playerNames::add);
             }
             
