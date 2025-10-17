@@ -443,4 +443,81 @@ public class ImageDownloader {
     public static void cleanupCache(int maxAgeHours) {
         // TODO: 实现缓存清理逻辑
     }
+    
+    /**
+     * 检查指定URL是否正在下载
+     * @param imageUrl 图片URL
+     * @param subDir 子目录（avatar或card）
+     * @return 是否正在下载
+     */
+    public static boolean isDownloading(String imageUrl, String subDir) {
+        if (imageUrl == null || imageUrl.trim().isEmpty()) {
+            return false;
+        }
+        
+        String fileName = extractFileNameFromUrl(imageUrl);
+        if (fileName == null) {
+            return false;
+        }
+        
+        String taskKey = subDir + "_" + fileName + "_" + imageUrl.hashCode();
+        var task = downloadTasks.get(taskKey);
+        return task != null && !task.isDone();
+    }
+    
+    /**
+     * 检查头像是否正在下载
+     * @param avatarUrl 头像URL
+     * @return 是否正在下载
+     */
+    public static boolean isAvatarDownloading(String avatarUrl) {
+        return isDownloading(avatarUrl, AVATAR_DIR);
+    }
+    
+    /**
+     * 检查用户卡片是否正在下载
+     * @param cardUrl 用户卡片URL
+     * @return 是否正在下载
+     */
+    public static boolean isUserCardDownloading(String cardUrl) {
+        return isDownloading(cardUrl, CARD_DIR);
+    }
+    
+    /**
+     * 获取正在进行的下载任务
+     * @param imageUrl 图片URL
+     * @param subDir 子目录
+     * @return 下载任务的CompletableFuture，如果没有则返回null
+     */
+    public static CompletableFuture<DownloadResult> getDownloadTask(String imageUrl, String subDir) {
+        if (imageUrl == null || imageUrl.trim().isEmpty()) {
+            return null;
+        }
+        
+        String fileName = extractFileNameFromUrl(imageUrl);
+        if (fileName == null) {
+            return null;
+        }
+        
+        String taskKey = subDir + "_" + fileName + "_" + imageUrl.hashCode();
+        return downloadTasks.get(taskKey);
+    }
+    
+    /**
+     * 获取头像下载任务
+     * @param avatarUrl 头像URL
+     * @return 下载任务的CompletableFuture，如果没有则返回null
+     */
+    public static CompletableFuture<DownloadResult> getAvatarDownloadTask(String avatarUrl) {
+        return getDownloadTask(avatarUrl, AVATAR_DIR);
+    }
+    
+    /**
+     * 获取用户卡片下载任务
+     * @param cardUrl 用户卡片URL
+     * @return 下载任务的CompletableFuture，如果没有则返回null
+     */
+    public static CompletableFuture<DownloadResult> getUserCardDownloadTask(String cardUrl) {
+        return getDownloadTask(cardUrl, CARD_DIR);
+    }
 }

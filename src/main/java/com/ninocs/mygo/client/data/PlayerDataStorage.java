@@ -4,12 +4,14 @@ import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
+import com.ninocs.mygo.api.playerXtnInfoApi;
 
 import java.io.FileWriter;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.util.Collections;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
@@ -100,13 +102,13 @@ public class PlayerDataStorage {
     
     /**
      * 读取玩家数据JSON文件
+     * 如果文件不存在或读取失败，则自动从API重新请求数据
      * 
      * @param playerName 玩家名称
      * @return JSON数据字符串，如果文件不存在或读取失败则返回null
      */
     public static String loadPlayerData(String playerName) {
         if (playerName == null || playerName.trim().isEmpty()) {
-            logger.log(Level.WARNING, "Player name is null or empty, cannot load data");
             return null;
         }
         
@@ -115,18 +117,72 @@ public class PlayerDataStorage {
             Path filePath = Paths.get(CACHE_DIR, fileName);
             
             if (!Files.exists(filePath)) {
-                logger.log(Level.INFO, "Player data file does not exist: " + filePath.toAbsolutePath());
-                return null;
+                return requestPlayerDataFromApi(playerName);
             }
             
-            String jsonData = Files.readString(filePath);
-            logger.log(Level.INFO, "Successfully loaded player data for: " + playerName);
-            return jsonData;
+            return Files.readString(filePath);
             
         } catch (IOException e) {
-            logger.log(Level.SEVERE, "Failed to load player data for: " + playerName, e);
-            return null;
+            return requestPlayerDataFromApi(playerName);
         }
+    }
+    
+    /**
+     * 从API重新请求玩家数据
+     * 注意：API调用成功后会自动保存数据到文件，此方法会重试获取保存的文件
+     * 
+     * @param playerName 玩家名称
+     * @return JSON数据字符串，如果请求失败则返回null
+     */
+    private static String requestPlayerDataFromApi(String playerName) {
+        final int MAX_RETRIES = 3;
+        final int RETRY_DELAY_MS = 100;
+        
+        try {
+            // 创建API请求
+            playerXtnInfoApi.QueryUserXtnInfoRequest request = 
+                new playerXtnInfoApi.QueryUserXtnInfoRequest(Collections.singletonList(playerName));
+            
+            // 调用API获取数据（API会自动保存数据到文件）
+            playerXtnInfoApi.QueryUserXtnInfoResponse response = 
+                playerXtnInfoApi.queryUserXtnInfo(request);
+            
+            if (response.isSuccess() && response.getData() != null) {
+                playerXtnInfoApi.UserInfo userInfo = response.getUserInfo(playerName);
+                if (userInfo != null) {
+                    // API已经自动保存了数据，重试读取保存的文件
+                    String fileName = sanitizeFileName(playerName) + ".json";
+                    Path filePath = Paths.get(CACHE_DIR, fileName);
+                    
+                    for (int retry = 0; retry < MAX_RETRIES; retry++) {
+                        try {
+                            if (Files.exists(filePath)) {
+                                return Files.readString(filePath);
+                            }
+                            // 如果文件不存在，等待一段时间后重试
+                            if (retry < MAX_RETRIES - 1) {
+                                Thread.sleep(RETRY_DELAY_MS);
+                            }
+                        } catch (IOException e) {
+                            if (retry == MAX_RETRIES - 1) {
+                                // 最后一次重试失败，使用手动转换
+                                return gson.toJson(userInfo);
+                            }
+                            Thread.sleep(RETRY_DELAY_MS);
+                        }
+                    }
+                    
+                    // 所有重试都失败，使用手动转换作为备用方案
+                    return gson.toJson(userInfo);
+                }
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        } catch (Exception e) {
+            logger.log(Level.SEVERE, "Failed to request player data from API for: " + playerName, e);
+        }
+        
+        return null;
     }
     
     /**

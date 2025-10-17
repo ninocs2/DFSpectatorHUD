@@ -296,14 +296,6 @@ public class WorldPlayerListener {
     }
 
     /**
-     * 检查是否为本地玩家
-     */
-    private static boolean isLocalPlayer(String playerName) {
-        Minecraft mc = Minecraft.getInstance();
-        return mc.player != null && playerName.equals(mc.player.getName().getString());
-    }
-
-    /**
      * 请求玩家信息
      */
     private static void requestPlayersInfo(List<String> playerNames, boolean isBatchRequest) {
