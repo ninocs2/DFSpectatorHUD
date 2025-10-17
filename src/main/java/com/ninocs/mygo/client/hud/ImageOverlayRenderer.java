@@ -29,7 +29,7 @@ import java.nio.file.Paths;
 @Mod.EventBusSubscriber(modid = "dfspectatorui", value = Dist.CLIENT)
 public class ImageOverlayRenderer {
     private static final Logger LOGGER = LogUtils.getLogger();
-    
+
     // 控制HUD显示的开关
     private static boolean hudEnabled = false;
     
@@ -271,7 +271,6 @@ public class ImageOverlayRenderer {
             Minecraft.getInstance().getTextureManager().release(dynamicTexture);
             dynamicTexture = null;
         }
-
     }
 
     /**
@@ -410,7 +409,7 @@ public class ImageOverlayRenderer {
                 if (targetPlayer != null) {
                     currentPlayer = targetPlayer;
                     useNativeSkin = true;
-                    avatarTexture = null;
+                    return;
                 }
             }
         }
@@ -450,7 +449,7 @@ public class ImageOverlayRenderer {
             avatarTexture = null;
         }
     }
-
+    
     @SubscribeEvent
     public static void onRenderOverlay(RenderGuiEvent.Post event) {
         if (!hudEnabled) {
@@ -458,104 +457,145 @@ public class ImageOverlayRenderer {
         }
 
         Minecraft mc = Minecraft.getInstance();
-        if (mc.player == null) {
+        GuiGraphics gui = event.getGuiGraphics();
+
+        // 只在观察者模式下显示
+        if (mc.player == null || !mc.player.isSpectator()) {
             return;
         }
 
-        // 检查是否在观察者模式
-        if (!mc.player.isSpectator()) {
+        // 防止在F1隐藏GUI时渲染
+        if (mc.options.hideGui) {
             return;
         }
 
-        // 获取当前观察的玩家名称
-        String observedPlayerName = getCurrentObservedPlayerName(mc);
+        // 检测观察状态变化并动态加载玩家数据
+        String targetPlayerName = getCurrentObservedPlayerName(mc);
+        if (!java.util.Objects.equals(currentObservedPlayer, targetPlayerName)) {
+            currentObservedPlayer = targetPlayerName;
+            
+            if (targetPlayerName != null) {
+                // 观察特定玩家
+                loadPlayerData(targetPlayerName);
+            } else {
+                // 自由观察状态，显示自己的信息
+                String selfName = mc.player.getName().getString();
+                loadPlayerData(selfName);
+            }
+        }
+
+        // 屏幕宽高
+        int screenWidth = event.getWindow().getGuiScaledWidth();
+        int screenHeight = event.getWindow().getGuiScaledHeight();
+
+        // 容器居中计算（只基于图片容器高度）
+        int frameX = screenWidth - FRAME_WIDTH - 2; // 右边距离2px
+        int frameY = (screenHeight / 2) - (FRAME_HEIGHT / 2); // 垂直居中
         
-        // 如果观察的玩家发生变化，重新加载数据
-        if (!observedPlayerName.equals(currentObservedPlayer)) {
-            currentObservedPlayer = observedPlayerName;
-            playerName = observedPlayerName;
-            
-            // 清理旧的纹理
-            if (dynamicTexture != null) {
-                mc.getTextureManager().release(dynamicTexture);
-                dynamicTexture = null;
-            }
-            if (avatarTexture != null) {
-                mc.getTextureManager().release(avatarTexture);
-                avatarTexture = null;
-            }
-            
-            // 重置状态
-            useNativeSkin = false;
-            currentPlayer = null;
-            isAvatarDownloading = false;
-            downloadingAvatarUrl = null;
-            downloadingCardUrl = null;
-            
-            // 加载新玩家的数据
-            loadPlayerData(observedPlayerName);
-        }
+        // 底部容器位置（位于图片容器内部的底部）
+        int bottomContainerY = frameY + FRAME_HEIGHT - BOTTOM_CONTAINER_HEIGHT; // 在图片容器底部
 
-        GuiGraphics guiGraphics = event.getGuiGraphics();
-        int screenWidth = mc.getWindow().getGuiScaledWidth();
-        int screenHeight = mc.getWindow().getGuiScaledHeight();
+        // 绘制图片容器（半透明黑色背景，无边框）
+        int bgColor = 0x80000000; // 半透明黑色背景
+        gui.fill(frameX, frameY, frameX + FRAME_WIDTH, frameY + FRAME_HEIGHT, bgColor);
 
-        // 计算容器位置（右上角）
-        int containerX = screenWidth - FRAME_WIDTH - 10;
-        int containerY = 10;
-
-        // 绘制背景容器
-        guiGraphics.fill(containerX, containerY, containerX + FRAME_WIDTH, containerY + FRAME_HEIGHT, 0x80000000);
-
-        // 绘制背景图片（如果有）
+        // 如果有背景图片，则绘制图片
         if (dynamicTexture != null) {
-            RenderSystem.setShaderTexture(0, dynamicTexture);
-            guiGraphics.blit(dynamicTexture, containerX, containerY, 0, 0, FRAME_WIDTH, FRAME_HEIGHT - BOTTOM_CONTAINER_HEIGHT, imageWidth, imageHeight);
+            // 图片缩放比例（填充整个容器，保持宽高比）
+            float scaleX = (float) FRAME_WIDTH / imageWidth;
+            float scaleY = (float) FRAME_HEIGHT / imageHeight;
+            float scale = Math.max(scaleX, scaleY); // 选择较大的缩放比例以填充整个容器
+            
+            int drawWidth = (int) (imageWidth * scale);
+            int drawHeight = (int) (imageHeight * scale);
+
+            // 计算裁剪区域（平均裁剪两侧和上下）
+            float uMin = 0.0f;
+            float vMin = 0.0f;
+            float uMax = 1.0f;
+            float vMax = 1.0f;
+            
+            // 如果宽度超出，平均裁剪左右两侧
+            if (drawWidth > FRAME_WIDTH) {
+                float excess = (drawWidth - FRAME_WIDTH) / (float) drawWidth;
+                uMin = excess / 2;
+                uMax = 1.0f - excess / 2;
+            }
+            
+            // 如果高度超出，平均裁剪上下两侧
+            if (drawHeight > FRAME_HEIGHT) {
+                float excess = (drawHeight - FRAME_HEIGHT) / (float) drawHeight;
+                vMin = excess / 2;
+                vMax = 1.0f - excess / 2;
+            }
+            
+            // 禁用模糊过滤，确保原分辨率绘制
+            try {
+                mc.getTextureManager().getTexture(dynamicTexture).setFilter(false, false);
+            } catch (Exception e) {
+                LOGGER.warn("[DFSpectatorUi] Failed to set texture filter: {}", e.getMessage());
+            }
+
+            // 开启混合以支持透明像素
+            RenderSystem.enableBlend();
+            RenderSystem.defaultBlendFunc();
+
+            // 绘制图片 - 使用UV坐标实现平均裁剪
+            gui.blit(
+                    dynamicTexture,
+                    frameX, frameY,
+                    FRAME_WIDTH, FRAME_HEIGHT,
+                    (int)(uMin * imageWidth), (int)(vMin * imageHeight),
+                    (int)(uMax * imageWidth - uMin * imageWidth), (int)(vMax * imageHeight - vMin * imageHeight),
+                    imageWidth, imageHeight
+            );
+            
+            RenderSystem.disableBlend();
         }
 
-        // 绘制底部容器
-        int bottomY = containerY + FRAME_HEIGHT - BOTTOM_CONTAINER_HEIGHT;
-        guiGraphics.fill(containerX, bottomY, containerX + FRAME_WIDTH, containerY + FRAME_HEIGHT, 0xCC000000);
+        // 绘制底部容器（覆盖在图片上方，半透明黑色背景）
+        int bottomBgColor = 0x50000000; // 半透明黑色背景
+        gui.fill(frameX, bottomContainerY, frameX + FRAME_WIDTH, bottomContainerY + BOTTOM_CONTAINER_HEIGHT, bottomBgColor);
 
-        // 绘制头像
-        int avatarX = containerX + AVATAR_MARGIN;
-        int avatarY = bottomY + (BOTTOM_CONTAINER_HEIGHT - AVATAR_SIZE) / 2;
-
-        if (avatarTexture != null) {
-            // 使用自定义头像
-            RenderSystem.setShaderTexture(0, avatarTexture);
-            guiGraphics.blit(avatarTexture, avatarX, avatarY, 0, 0, AVATAR_SIZE, AVATAR_SIZE, AVATAR_SIZE, AVATAR_SIZE);
-        } else if (useNativeSkin && currentPlayer != null) {
+        // 绘制头像（在底部容器中靠左居中）
+        int avatarX = frameX + AVATAR_MARGIN;
+        int avatarY = bottomContainerY + (BOTTOM_CONTAINER_HEIGHT - AVATAR_SIZE) / 2; // 垂直居中
+        
+        if (useNativeSkin && currentPlayer != null) {
             // 使用原生皮肤头像
             PlayerInfo playerInfo = mc.getConnection().getPlayerInfo(currentPlayer.getUUID());
             if (playerInfo != null) {
-                ResourceLocation skinLocation = playerInfo.getSkinLocation();
-                RenderSystem.setShaderTexture(0, skinLocation);
-                
-                // 绘制头部（8x8像素，从皮肤纹理的8,8位置开始）
-                guiGraphics.blit(skinLocation, avatarX, avatarY, AVATAR_SIZE, AVATAR_SIZE, 8, 8, 8, 8, 64, 64);
-                
-                // 绘制头部覆盖层（帽子等，从皮肤纹理的40,8位置开始）
-                guiGraphics.blit(skinLocation, avatarX, avatarY, AVATAR_SIZE, AVATAR_SIZE, 40, 8, 8, 8, 64, 64);
+                ResourceLocation skinTexture = playerInfo.getSkinLocation();
+                // 绘制头部
+                gui.blit(skinTexture, avatarX, avatarY, AVATAR_SIZE, AVATAR_SIZE, 8, 8, 8, 8, 64, 64);
+                // 绘制帽子层
+                gui.blit(skinTexture, avatarX, avatarY, AVATAR_SIZE, AVATAR_SIZE, 40, 8, 8, 8, 64, 64);
             }
+        } else if (avatarTexture != null) {
+            // 使用自定义头像
+            gui.blit(
+                    avatarTexture,
+                    avatarX, avatarY,
+                    AVATAR_SIZE, AVATAR_SIZE,
+                    0, 0,
+                    AVATAR_SIZE, AVATAR_SIZE,
+                    AVATAR_SIZE, AVATAR_SIZE
+            );
         }
 
-        // 绘制玩家名称
-        int textX = avatarX + AVATAR_SIZE + 5;
-        int textY = bottomY + (BOTTOM_CONTAINER_HEIGHT - mc.font.lineHeight) / 2;
-        
-        // 计算可用文本宽度
-        int availableWidth = FRAME_WIDTH - AVATAR_SIZE - AVATAR_MARGIN - 5 - 5; // 减去头像、边距和额外间距
-        
-        // 如果文本太长，进行截断
-        String displayName = playerName;
-        if (mc.font.width(displayName) > availableWidth) {
-            displayName = mc.font.plainSubstrByWidth(displayName, availableWidth - mc.font.width("...")) + "...";
+        // 绘制玩家名称（在底部容器中右侧显示）
+        String displayName = currentObservedPlayer != null ? currentObservedPlayer : playerName;
+        if (displayName != null && !displayName.isEmpty()) {
+            int textX = frameX + AVATAR_MARGIN + AVATAR_SIZE + 4; // 头像右侧4像素间距
+            int textY = bottomContainerY + (BOTTOM_CONTAINER_HEIGHT - 8) / 2; // 垂直居中（字体高度约8像素）
+            int textColor = 0xFFFFFFFF; // 白色文字
+            
+            gui.drawString(Minecraft.getInstance().font, displayName, textX, textY, textColor);
         }
-        
-        guiGraphics.drawString(mc.font, displayName, textX, textY, 0xFFFFFF);
+
+        RenderSystem.disableBlend();
     }
-
+    
     /**
      * 获取当前观察的玩家名称
      * @param mc Minecraft实例
@@ -575,8 +615,24 @@ public class ImageOverlayRenderer {
      * 通知观察状态变化（由SpectatorModeListener调用）
      */
     public static void notifyObservedPlayerChange(String playerName) {
-        // 强制重新加载数据
-        currentObservedPlayer = null;
+        if (!hudEnabled) {
+            return;
+        }
+        
+        if (!java.util.Objects.equals(currentObservedPlayer, playerName)) {
+            currentObservedPlayer = playerName;
+            
+            if (playerName != null) {
+                loadPlayerData(playerName);
+            } else {
+                // 自由观察状态，显示自己的信息
+                Minecraft mc = Minecraft.getInstance();
+                if (mc.player != null) {
+                    String selfName = mc.player.getName().getString();
+                    loadPlayerData(selfName);
+                }
+            }
+        }
     }
 
     /**

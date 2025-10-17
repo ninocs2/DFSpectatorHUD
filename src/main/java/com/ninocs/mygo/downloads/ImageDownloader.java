@@ -41,6 +41,11 @@ public class ImageDownloader {
     private static final String AVATAR_DIR = "avatar";
     private static final String CARD_DIR = "card";
     
+    // 重试机制配置
+    private static final int MAX_RETRY_ATTEMPTS = 5; // 最大重试次数
+    private static final long RETRY_DELAY_MS = 1000; // 重试延迟（毫秒）
+    private static final double RETRY_BACKOFF_MULTIPLIER = 2.0; // 重试延迟倍数
+    
     // 下载状态跟踪
     private static final ConcurrentHashMap<String, CompletableFuture<DownloadResult>> downloadTasks = new ConcurrentHashMap<>();
     
@@ -172,7 +177,7 @@ public class ImageDownloader {
         // 创建新的下载任务
         var downloadTask = CompletableFuture.supplyAsync(() -> {
             try {
-                return performDownload(imageUrl, fileName, subDir, callback);
+                return performDownloadWithRetry(imageUrl, fileName, subDir, callback);
             } catch (Exception e) {
                 logger.log(Level.SEVERE, "Unexpected error during download", e);
                 var errorResult = new DownloadResult(false, null, "Unexpected error: " + e.getMessage(), 0);
@@ -192,6 +197,109 @@ public class ImageDownloader {
         return downloadTask;
     }
     
+    /**
+     * 带重试机制的下载方法
+     * @param imageUrl 图片URL
+     * @param fileName 文件名
+     * @param subDir 子目录
+     * @param callback 进度回调
+     * @return 下载结果
+     */
+    private static DownloadResult performDownloadWithRetry(String imageUrl, String fileName, String subDir, 
+                                                           DownloadProgressCallback callback) {
+        DownloadResult lastResult = null;
+        long currentDelay = RETRY_DELAY_MS;
+        
+        for (int attempt = 1; attempt <= MAX_RETRY_ATTEMPTS; attempt++) {
+            try {
+                // 如果不是第一次尝试，等待一段时间
+                if (attempt > 1) {
+                    logger.log(Level.INFO, "Retrying download (attempt {0}/{1}) for: {2}", 
+                              new Object[]{attempt, MAX_RETRY_ATTEMPTS, imageUrl});
+                    Thread.sleep(currentDelay);
+                    currentDelay = (long) (currentDelay * RETRY_BACKOFF_MULTIPLIER);
+                }
+                
+                // 执行下载
+                DownloadResult result = performDownload(imageUrl, fileName, subDir, callback);
+                
+                // 如果成功，直接返回
+                if (result.isSuccess()) {
+                    if (attempt > 1) {
+                        logger.log(Level.INFO, "Download succeeded on attempt {0} for: {1}", 
+                                  new Object[]{attempt, imageUrl});
+                    }
+                    return result;
+                }
+                
+                // 记录失败的结果
+                lastResult = result;
+                
+                // 如果是最后一次尝试，不再重试
+                if (attempt == MAX_RETRY_ATTEMPTS) {
+                    logger.log(Level.WARNING, "Download failed after {0} attempts for: {1}, last error: {2}", 
+                              new Object[]{MAX_RETRY_ATTEMPTS, imageUrl, result.getErrorMessage()});
+                    break;
+                }
+                
+                // 检查是否是不应该重试的错误（如404等）
+                if (shouldNotRetry(result.getErrorMessage())) {
+                    logger.log(Level.WARNING, "Download failed with non-retryable error for: {0}, error: {1}", 
+                              new Object[]{imageUrl, result.getErrorMessage()});
+                    break;
+                }
+                
+                logger.log(Level.WARNING, "Download attempt {0} failed for: {1}, error: {2}", 
+                          new Object[]{attempt, imageUrl, result.getErrorMessage()});
+                
+            } catch (InterruptedException e) {
+                logger.log(Level.WARNING, "Download retry was interrupted for: " + imageUrl, e);
+                Thread.currentThread().interrupt(); // 恢复中断状态
+                return new DownloadResult(false, null, "Download was interrupted", 0);
+            } catch (Exception e) {
+                logger.log(Level.SEVERE, "Unexpected error during download attempt " + attempt + " for: " + imageUrl, e);
+                lastResult = new DownloadResult(false, null, "Unexpected error: " + e.getMessage(), 0);
+                
+                // 如果是最后一次尝试，不再重试
+                if (attempt == MAX_RETRY_ATTEMPTS) {
+                    break;
+                }
+            }
+        }
+        
+        // 所有重试都失败了，返回最后一次的错误结果
+        return lastResult != null ? lastResult : new DownloadResult(false, null, "All retry attempts failed", 0);
+    }
+    
+    /**
+     * 判断是否不应该重试的错误
+     * @param errorMessage 错误消息
+     * @return true如果不应该重试，false如果可以重试
+     */
+    private static boolean shouldNotRetry(String errorMessage) {
+        if (errorMessage == null) {
+            return false;
+        }
+        
+        String lowerError = errorMessage.toLowerCase();
+        
+        // HTTP 4xx 错误通常不应该重试（客户端错误）
+        if (lowerError.contains("404") || lowerError.contains("not found") ||
+            lowerError.contains("403") || lowerError.contains("forbidden") ||
+            lowerError.contains("401") || lowerError.contains("unauthorized") ||
+            lowerError.contains("400") || lowerError.contains("bad request")) {
+            return true;
+        }
+        
+        // SHA256验证失败通常不应该重试（除非是网络传输错误）
+        if (lowerError.contains("sha256 verification failed")) {
+            return true;
+        }
+        
+        // 其他错误可以重试（如网络超时、连接错误等）
+        return false;
+    }
+
     /**
      * 执行实际的下载操作
      * @param imageUrl 图片URL
